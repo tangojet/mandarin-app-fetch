@@ -57,6 +57,16 @@ WECHAT_PATTERNS = [
     re.compile(r"https?://mp\.weixin\.qq\.com/s\?[^\s]+"),
 ]
 
+# Goofish (闲鱼) URL patterns
+GOOFISH_PATTERNS = [
+    # Item page: goofish.com/item?id={itemId} (id can be any query param position)
+    re.compile(r"https?://(?:www\.)?goofish\.com/item\?(?:[^#]*&)?id=(\d+)"),
+    # Mobile: h5.m.goofish.com/item?id={itemId}
+    re.compile(r"https?://h5\.m\.goofish\.com/item\?(?:[^#]*&)?id=(\d+)"),
+    # Legacy idle.taobao URLs
+    re.compile(r"https?://market\.m\.taobao\.com/app/idleFish-F2e/.*[?&]id=(\d+)"),
+]
+
 # Weibo URL patterns
 WEIBO_PATTERNS = [
     # Desktop: weibo.com/{uid}/{id}
@@ -87,6 +97,10 @@ def detect_platform(url: str) -> Optional[str]:
             return "bilibili"
     if BILIBILI_SHORTLINK.search(url):
         return "bilibili"
+
+    for pat in GOOFISH_PATTERNS:
+        if pat.search(url):
+            return "goofish"
 
     for pat in WECHAT_PATTERNS:
         if pat.search(url):
@@ -155,6 +169,15 @@ def extract_xueqiu_post_id(url: str) -> Optional[str]:
 def extract_toutiao_item_id(url: str) -> Optional[str]:
     """Extract item ID from a toutiao.com URL."""
     for pat in TOUTIAO_PATTERNS:
+        m = pat.search(url)
+        if m:
+            return m.group(1)
+    return None
+
+
+def extract_goofish_item_id(url: str) -> Optional[str]:
+    """Extract item ID from a goofish.com URL."""
+    for pat in GOOFISH_PATTERNS:
         m = pat.search(url)
         if m:
             return m.group(1)

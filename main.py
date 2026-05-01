@@ -18,6 +18,7 @@ from extractors.yuanbao import extract_with_yuanbao, is_configured as yuanbao_co
 from models import SocialMediaPost
 from platforms.bilibili import BilibiliPlatform
 from platforms.douyin import DouyinPlatform
+from platforms.goofish import GoofishPlatform
 from platforms.weibo import WeiboPlatform
 from platforms.xhs import XhsPlatform
 from platforms.toutiao import ToutiaoPlatform
@@ -38,6 +39,7 @@ PLATFORMS = {
     "weibo": WeiboPlatform(),
     "xueqiu": XueqiuPlatform(),
     "toutiao": ToutiaoPlatform(),
+    "goofish": GoofishPlatform(),
 }
 
 # Rate limiting — minimum seconds between requests per platform
@@ -49,6 +51,7 @@ DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "bilibili": 5,
     "xueqiu": 5,
     "toutiao": 8,
+    "goofish": 8,
 }
 RATE_LIMITS = {
     k: int(os.environ.get(f"RATE_LIMIT_{k.upper()}", v))
