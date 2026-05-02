@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import JSONResponse
 
 from browser_manager import close_browser, update_platform_cookies
-from extractors.doubao import extract_with_doubao, is_configured as doubao_configured
+from doubao_service.config import DoubaoConfig, is_configured as doubao_is_configured, load_config as load_doubao_config
+from doubao_service.provider import DoubaoProvider
+from extractors.doubao import extract_with_doubao
 from extractors.yuanbao import extract_with_yuanbao, is_configured as yuanbao_configured
 from models import SocialMediaPost
 from platforms.bilibili import BilibiliPlatform
@@ -78,11 +81,41 @@ def _check_rate_limit(platform: str) -> None:
     _last_request[platform] = now
 
 
+# --- Doubao provider (global, initialised in lifespan) ---
+_doubao_provider: Optional[DoubaoProvider] = None
+_doubao_config: Optional[DoubaoConfig] = None
+
+
+def get_doubao_provider() -> Optional[DoubaoProvider]:
+    """Return the global DoubaoProvider if initialised."""
+    return _doubao_provider
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _doubao_provider, _doubao_config
+
     logger.info("media-fetch-api starting")
+
+    # Initialise Doubao provider if configured
+    _doubao_config = load_doubao_config()
+    if doubao_is_configured(_doubao_config):
+        try:
+            _doubao_provider = DoubaoProvider(_doubao_config)
+            await _doubao_provider.initialize()
+            logger.info("Doubao provider initialised (models: %s)",
+                        ", ".join(_doubao_config.model_mapping.keys()))
+        except Exception:
+            logger.exception("Failed to initialise Doubao provider — continuing without it")
+            _doubao_provider = None
+    else:
+        logger.info("Doubao provider not configured (missing env vars), skipping")
+
     yield
+
     logger.info("media-fetch-api shutting down")
+    if _doubao_provider:
+        await _doubao_provider.close()
     await close_browser()
 
 
@@ -219,10 +252,10 @@ async def extract_content(
             status_code=501,
             detail="Yuanbao backend not configured (missing cookie file)",
         )
-    if backend == "doubao" and not doubao_configured():
+    if backend == "doubao" and not _doubao_provider:
         raise HTTPException(
             status_code=501,
-            detail="Doubao backend not configured (DOUBAO_API_URL not set)",
+            detail="Doubao backend not configured (missing DOUBAO_COOKIE / device fingerprint env vars)",
         )
 
     _check_extract_rate_limit(backend)
@@ -246,6 +279,47 @@ async def extract_content(
         "url": url,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# --- Doubao OpenAI-compatible endpoints (from doubao-2api) ---
+
+async def _verify_doubao_api_key(authorization: Optional[str] = Header(None)) -> None:
+    """Check Bearer token against DOUBAO_API_KEY / API_MASTER_KEY if set."""
+    if not _doubao_config or not _doubao_config.api_master_key:
+        return
+    key = _doubao_config.api_master_key
+    if key == "1":  # magic value = no auth
+        return
+    if not authorization or "bearer" not in authorization.lower():
+        raise HTTPException(status_code=401, detail="Bearer token required.")
+    token = authorization.split(" ")[-1]
+    if token != key:
+        raise HTTPException(status_code=403, detail="Invalid API key.")
+
+
+@app.post("/v1/chat/completions")
+async def doubao_chat_completions(request: Request, authorization: Optional[str] = Header(None)):
+    await _verify_doubao_api_key(authorization)
+    if not _doubao_provider:
+        raise HTTPException(status_code=501, detail="Doubao provider not configured or failed to initialise.")
+    try:
+        request_data = await request.json()
+        logger.info("POST /v1/chat/completions model=%s stream=%s",
+                     request_data.get("model", "?"), request_data.get("stream", True))
+        return await _doubao_provider.chat_completion(request_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in /v1/chat/completions")
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+
+
+@app.get("/v1/models")
+async def doubao_list_models(authorization: Optional[str] = Header(None)):
+    await _verify_doubao_api_key(authorization)
+    if not _doubao_provider:
+        raise HTTPException(status_code=501, detail="Doubao provider not configured or failed to initialise.")
+    return await _doubao_provider.get_models()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,85 @@
+# mandarin-app-fetch
+
+Unified API server (FastAPI, port 8089) that scrapes Chinese social media posts
+given a URL and returns structured JSON. It is the **social media scraping backend**
+for Jun's openclaw test-two bot — the ozaiya plugin calls `http://host.docker.internal:8089/fetch?url=...`.
+
+```
+User (chat) → test-two bot → ozaiya plugin → mandarin-app-fetch (:8089)
+                                                      ↓
+                                            Playwright / Docker CDP → target site
+```
+
+## Endpoints
+
+- `GET /fetch?url=...` — Scrape a social media post, return structured JSON
+- `GET /search?platform=xueqiu&q=...` — Keyword search (Xueqiu only)
+- `GET /extract?url=...` — LLM summary via Doubao or Yuanbao (for WeChat articles etc.)
+- `POST /v1/chat/completions` — OpenAI-compatible Doubao chat (from integrated doubao-2api)
+- `GET /v1/models` — List available Doubao models
+
+## Supported Platforms
+
+| Platform       | Method                                      |
+|----------------|---------------------------------------------|
+| 小红书 XHS     | Docker CDP → Playwright fallback            |
+| 抖音 Douyin    | Playwright in-page fetch → Docker CDP       |
+| B站 Bilibili   | Playwright → `__INITIAL_STATE__` parsing    |
+| 微博 Weibo     | Playwright → mobile API (m.weibo.cn)        |
+| 雪球 Xueqiu    | Playwright → same-origin fetch (WAF bypass) |
+| 头条 Toutiao   | Playwright → web API → DOM fallback         |
+| 闲鱼 Goofish   | Docker CDP (goofish-browser container)      |
+
+## How It Works
+
+1. Launches headless Chromium via Playwright (with anti-detection stealth patches)
+2. Navigates to the target URL as a real browser
+3. Calls the site's internal API from within the page context (same-origin bypasses CORS/WAF)
+4. Parses response into a normalized `SocialMediaPost` schema
+5. Per-platform rate limiting prevents abuse
+
+Goofish uses a separate approach: a CDP extraction script (`goofish-cdp-extract.js`)
+runs inside Jun's `goofish-browser` Docker container which has a logged-in Chrome session.
+
+## Key Files
+
+- `main.py` — FastAPI app, platform registry, rate limiting, all endpoints
+- `url_parser.py` — URL pattern detection and ID extraction per platform
+- `browser_manager.py` — Playwright browser/context lifecycle, cookie management
+- `platforms/*.py` — Per-platform scraper implementations
+- `goofish-cdp-extract.js` — CDP script for Goofish (runs inside Docker container)
+- `models.py` — `SocialMediaPost`, `Author`, `Comment` schemas
+- `extractors/` — LLM-based content extractors (Doubao, Yuanbao)
+- `doubao_service/` — Integrated Doubao LLM service (formerly standalone doubao-2api on port 8088)
+  - `config.py` — Configuration from env vars (cookies, device fingerprint, model mapping)
+  - `provider.py` — Chat completion logic, payload building, OpenAI-compatible responses
+  - `playwright_mgr.py` — Headless browser lifecycle, cookie injection, in-page fetch + SSE parsing
+  - `credentials.py` — Multi-cookie rotation
+  - `sessions.py` — Conversation ID caching (TTLCache)
+  - `sse_utils.py` — SSE formatting helpers
+- `.env.example` — Template for required environment variables
+
+## Jun's Infrastructure (192.168.1.181)
+
+- SSH: `jun@192.168.1.181`
+- Docker binary: `/Applications/Docker.app/Contents/Resources/bin/docker`
+- **test-two bot**: agent (port 18820), browser (noVNC: 6090), desktop (55007)
+  - Config: `~/.openclaw-test-two/openclaw.json`
+  - Docker compose: `~/.openclaw-test-two/docker/docker-compose.yml`
+  - Browser data: `~/openclaw-local/browser-data/test-two-chrome`
+- **goofish bot**: agent (port 18840), browser (noVNC: 16090)
+  - Config: `~/.openclaw-goofish/openclaw.json`
+  - Browser data: `~/openclaw-local/browser-data/goofish-chrome`
+
+## Development Notes
+
+- Chrome DevTools Protocol rejects WebSocket with non-localhost Host headers.
+  Browser containers need `--remote-allow-origins=*` flag for cross-container CDP access.
+- **Never recreate browser containers without persistent volume mounts** — loses all
+  logged-in sessions.
+- Weibo "Sina Visitor System" = missing login session, not IP block. Works via
+  same-origin fetch from a browser tab on weibo.com.
+- **Doubao service** is integrated directly — no separate doubao-2api process on port 8088
+  needed. The `/v1/chat/completions` endpoint is served from this app on port 8089.
+  Configure via env vars in `.env` (see `.env.example`).
+- Git remote: `git@github.com:tangojet/mandarin-app-fetch.git`

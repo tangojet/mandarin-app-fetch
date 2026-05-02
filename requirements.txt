@@ -2,3 +2,7 @@ fastapi>=0.110
 uvicorn>=0.29
 playwright>=1.42
 httpx>=0.27
+pydantic-settings>=2.0
+python-dotenv>=1.0
+cachetools>=5.3
+playwright-stealth>=1.0.6
