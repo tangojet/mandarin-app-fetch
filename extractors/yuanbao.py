@@ -4,7 +4,7 @@ WeChat article URLs (mp.weixin.qq.com) are blocked for external crawlers.
 Tencent Yuanbao has privileged access to WeChat content and can summarize articles.
 
 Env vars:
-  YUANBAO_COOKIE_FILE   — Path to cookie file (default: ~/.media-fetch-api/yuanbao-cookies.txt)
+  YUANBAO_COOKIE_FILE   — Path to cookie file (default: ~/.mandarin-app-fetch/yuanbao-cookies.txt)
   YUANBAO_AGENT_ID      — Agent ID (default: naQivTmsDa)
   YUANBAO_CHAT_MODEL_ID — Chat model ID (default: deep_seek_v3)
 """

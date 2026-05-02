@@ -1,7 +1,7 @@
 """Unified cookie management — single source of truth for all services.
 
 All file-based cookies are stored in Playwright JSON format under
-~/.media-fetch-api/{service}-cookies.json with a sibling .meta.json
+~/.mandarin-app-fetch/{service}-cookies.json with a sibling .meta.json
 tracking provenance.
 
 Accepts both raw header strings ("k1=v1; k2=v2") and Playwright JSON
@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger("cookie_manager")
 
-COOKIE_DIR = Path.home() / ".media-fetch-api"
+COOKIE_DIR = Path.home() / ".mandarin-app-fetch"
 
 # Service name → default cookie domain
 SERVICES: dict[str, str] = {

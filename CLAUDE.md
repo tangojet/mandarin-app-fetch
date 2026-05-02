@@ -76,7 +76,7 @@ runs inside Jun's `goofish-browser` Docker container which has a logged-in Chrom
 ## Cookie Management
 
 All file-based cookies are stored uniformly in **Playwright JSON format** under
-`~/.media-fetch-api/{service}-cookies.json`, managed by `cookie_manager.py`.
+`~/.mandarin-app-fetch/{service}-cookies.json`, managed by `cookie_manager.py`.
 
 - **Update cookies:** `POST /cookies/{service}` — accepts raw header string
   (`Content-Type: text/plain`) or Playwright JSON array (`application/json`).

@@ -44,7 +44,7 @@ def load_config() -> DoubaoConfig:
     """Build a ``DoubaoConfig`` from environment variables.
 
     Cookie loading priority:
-    1. cookie_manager file (~/.media-fetch-api/doubao-cookies.json)
+    1. cookie_manager file (~/.mandarin-app-fetch/doubao-cookies.json)
     2. DOUBAO_COOKIE_1 env var (legacy)
     """
     import cookie_manager
