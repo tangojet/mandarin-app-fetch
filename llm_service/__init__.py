@@ -1,8 +1,7 @@
-"""LLM service — direct HTTP Doubao chat completions (no browser needed).
+"""LLM service — Doubao chat completions via CDP (Chrome DevTools Protocol).
 
-Uses sessionid cookies + Chrome header spoofing to call Doubao's
-/samantha/chat/completion endpoint directly. Replaces the old Playwright-based
-doubao_service with a faster, more reliable approach.
+Executes chat requests inside a logged-in Docker Chrome session on doubao.com.
+The browser's Argus SDK handles a_bogus/msToken signing automatically.
 """
 
 from llm_service.provider import LLMProvider

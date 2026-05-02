@@ -7,7 +7,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import JSONResponse
@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
             logger.exception("Failed to initialise LLM provider — continuing without it")
             _llm_provider = None
     else:
-        logger.info("LLM provider not configured (missing session IDs or device params), skipping")
+        logger.info("LLM provider not configured (no CDP container), skipping")
 
     yield
 
@@ -234,7 +234,7 @@ async def update_cookies(service: str, request: Request):
     else:
         cookie_manager.save_cookies(service, cookies, source="api")
 
-    # doubao: stateless HTTP client — just save the cookies, no hot-reload needed
+    # doubao: CDP uses browser's live cookies — file not used at runtime, just saved for backup
     # yuanbao: reads file fresh each request — no-op
 
     return {"status": "ok", "count": len(cookies)}
@@ -297,7 +297,7 @@ async def extract_content(
     if backend == "doubao" and not _llm_provider:
         raise HTTPException(
             status_code=501,
-            detail="LLM backend not configured (missing session IDs or device params)",
+            detail="LLM backend not configured (no CDP container)",
         )
 
     _check_extract_rate_limit(backend)
@@ -362,26 +362,6 @@ async def llm_list_models(authorization: Optional[str] = Header(None)):
     if not _llm_provider:
         raise HTTPException(status_code=501, detail="LLM provider not configured or failed to initialise.")
     return await _llm_provider.get_models()
-
-
-@app.post("/token/check")
-async def check_token(request: Request):
-    """Validate a Doubao sessionid token.
-
-    Send the sessionid as the Bearer token in the Authorization header.
-    """
-    auth = request.headers.get("authorization", "")
-    if not auth or "bearer" not in auth.lower():
-        raise HTTPException(status_code=400, detail="Send sessionid as Bearer token in Authorization header.")
-    token = auth.split(" ")[-1].strip()
-    if not token:
-        raise HTTPException(status_code=400, detail="Empty token.")
-
-    if not _llm_provider:
-        raise HTTPException(status_code=501, detail="LLM provider not configured.")
-
-    valid = await _llm_provider.http_client.check_token(token)
-    return {"valid": valid, "token": token[:6] + "..." + token[-4:] if len(token) > 12 else "***"}
 
 
 if __name__ == "__main__":

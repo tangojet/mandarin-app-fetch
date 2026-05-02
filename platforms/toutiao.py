@@ -255,13 +255,27 @@ class ToutiaoPlatform(BasePlatform):
                 }
 
             if source == "render_data":
-                # RENDER_DATA may contain nested structures — search for article data
+                # RENDER_DATA structure: {data: {title, content, mediaInfo, ...}}
+                # First check if a top-level value has both title and content (direct match)
+                found = False
                 for key, value in content_data.items():
                     if not isinstance(value, dict):
                         continue
-                    for sub_key, sub_value in value.items():
-                        if isinstance(sub_value, dict) and sub_value.get("title"):
-                            content_data = sub_value
+                    if value.get("title") and (value.get("content") or value.get("abstract")):
+                        content_data = value
+                        found = True
+                        break
+                # Fallback: search nested sub-values
+                if not found:
+                    for key, value in content_data.items():
+                        if not isinstance(value, dict):
+                            continue
+                        for sub_key, sub_value in value.items():
+                            if isinstance(sub_value, dict) and sub_value.get("title") and (sub_value.get("content") or sub_value.get("abstract")):
+                                content_data = sub_value
+                                found = True
+                                break
+                        if found:
                             break
 
             # SSR or render_data: try common field names
@@ -278,18 +292,45 @@ class ToutiaoPlatform(BasePlatform):
             if "<" in abstract:
                 abstract = re.sub(r"<[^>]+>", "", abstract).strip()
 
-            author_info = content_data.get("author", {}) or content_data.get("user", {})
+            # Author: check mediaInfo (Toutiao pattern) then author/user
+            author_info = (
+                content_data.get("mediaInfo", {})
+                or content_data.get("author", {})
+                or content_data.get("user", {})
+            )
+
+            # Extract images from HTML content
+            raw_content = content_data.get("content", "")
+            images = []
+            if raw_content and "<" in raw_content:
+                for img_match in re.findall(r'<img[^>]+src="([^"]+)"', raw_content):
+                    if img_match.startswith("http"):
+                        images.append(img_match)
+
+            # Stats from itemCell if available
+            stats = {}
+            item_cell = content_data.get("itemCell", {})
+            if isinstance(item_cell, dict):
+                counter = item_cell.get("itemCounter", {})
+                if isinstance(counter, dict):
+                    stats = {
+                        "likes": counter.get("diggCount", 0),
+                        "comments": counter.get("commentCount", 0),
+                        "shares": counter.get("shareCount", 0),
+                        "collects": counter.get("collectCount", 0),
+                        "views": counter.get("readCount", 0),
+                    }
 
             return {
                 "title": title,
                 "content": abstract,
                 "author": {
-                    "name": author_info.get("name", "") or author_info.get("nickname", ""),
-                    "id": str(author_info.get("user_id", "") or author_info.get("id", "")),
-                    "avatar": author_info.get("avatar_url"),
+                    "name": author_info.get("name", "") or author_info.get("nickname", "") or author_info.get("screen_name", ""),
+                    "id": str(author_info.get("userId", "") or author_info.get("user_id", "") or author_info.get("id", "")),
+                    "avatar": author_info.get("avatarUrl") or author_info.get("avatar_url"),
                 },
-                "stats": {},
-                "images": [],
+                "stats": stats,
+                "images": images,
                 "video_url": None,
             }
 
@@ -324,7 +365,11 @@ class ToutiaoPlatform(BasePlatform):
                 logger.warning(f"toutiao: comment fetch error: {data['error']}")
                 return []
 
-            comments_data = data.get("data", {}).get("comments", []) or data.get("comments", [])
+            inner = data.get("data", {})
+            if not isinstance(inner, dict):
+                logger.warning("toutiao: comment API returned non-dict data")
+                return []
+            comments_data = inner.get("comments", []) or data.get("comments", [])
             comments = []
             for c in comments_data[:max_comments]:
                 user_info = c.get("user", {})

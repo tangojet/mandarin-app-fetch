@@ -51,30 +51,12 @@ class WeiboPlatform(BasePlatform):
             await page.goto(nav_url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(3000)
 
-            # Fetch post data via mobile API (in-page fetch to reuse cookies)
-            post_data = await page.evaluate(
-                """async (weiboId) => {
-                    try {
-                        const resp = await fetch(
-                            `https://m.weibo.cn/statuses/show?id=${weiboId}`,
-                            { credentials: 'include' }
-                        );
-                        const data = await resp.json();
-                        return JSON.stringify(data);
-                    } catch(e) {
-                        return JSON.stringify({error: e.message});
-                    }
-                }""",
-                weibo_id,
-            )
-
-            data = json.loads(post_data)
-            if data.get("error"):
-                raise RuntimeError(f"Weibo API error: {data['error']}")
-
-            status = data.get("data", {})
+            # Try API first, then $render_data fallback
+            status = await self._fetch_via_api(page, weibo_id)
             if not status:
-                raise RuntimeError(f"No status data returned for weibo {weibo_id}")
+                status = await self._extract_render_data(page)
+            if not status:
+                raise RuntimeError(f"Failed to extract weibo {weibo_id} via API or page data")
 
             # Extract fields
             raw_text = status.get("text", "")
@@ -134,6 +116,63 @@ class WeiboPlatform(BasePlatform):
 
         finally:
             await page.close()
+
+    async def _fetch_via_api(self, page, weibo_id: str) -> dict | None:
+        """Fetch post data via mobile API (in-page fetch to reuse cookies)."""
+        try:
+            post_data = await page.evaluate(
+                """async (weiboId) => {
+                    try {
+                        const resp = await fetch(
+                            `https://m.weibo.cn/statuses/show?id=${weiboId}`,
+                            { credentials: 'include' }
+                        );
+                        const data = await resp.json();
+                        return JSON.stringify(data);
+                    } catch(e) {
+                        return JSON.stringify({error: e.message});
+                    }
+                }""",
+                weibo_id,
+            )
+            data = json.loads(post_data)
+            if data.get("error"):
+                logger.warning(f"weibo: API error: {data['error']}")
+                return None
+            status = data.get("data", {})
+            if not status or not status.get("text"):
+                return None
+            logger.info("weibo: got data via API")
+            return status
+        except Exception as e:
+            logger.warning(f"weibo: API fetch failed: {e}")
+            return None
+
+    async def _extract_render_data(self, page) -> dict | None:
+        """Fallback: extract post data from $render_data (embedded in page without login)."""
+        try:
+            result = await page.evaluate(
+                """() => {
+                    try {
+                        if (window.$render_data && window.$render_data.status) {
+                            return JSON.stringify(window.$render_data.status);
+                        }
+                        return null;
+                    } catch(e) {
+                        return null;
+                    }
+                }"""
+            )
+            if not result:
+                return None
+            status = json.loads(result)
+            if status.get("text"):
+                logger.info("weibo: got data via $render_data")
+                return status
+            return None
+        except Exception as e:
+            logger.warning(f"weibo: $render_data extraction failed: {e}")
+            return None
 
     async def _fetch_comments(self, page, weibo_id: str, max_comments: int) -> List[Comment]:
         """Fetch comments via in-page fetch to mobile weibo API."""

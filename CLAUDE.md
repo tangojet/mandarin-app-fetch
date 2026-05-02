@@ -17,9 +17,8 @@ User (chat) → test-two bot → ozaiya plugin → mandarin-app-fetch (:8089)
 - `GET /extract?url=...` — LLM summary via Doubao or Yuanbao (for WeChat articles etc.)
 - `POST /cookies/{service}` — Update cookies (raw string or Playwright JSON), hot-reloads live sessions
 - `GET /cookies/status` — Cookie status for all services
-- `POST /v1/chat/completions` — OpenAI-compatible Doubao chat via direct HTTP
+- `POST /v1/chat/completions` — OpenAI-compatible Doubao chat via CDP
 - `GET /v1/models` — List available Doubao models
-- `POST /token/check` — Validate a Doubao sessionid token
 
 ## Supported Platforms
 
@@ -54,10 +53,11 @@ runs inside Jun's `goofish-browser` Docker container which has a logged-in Chrom
 - `goofish-cdp-extract.js` — CDP script for Goofish (runs inside Docker container)
 - `models.py` — `SocialMediaPost`, `Author`, `Comment` schemas
 - `extractors/` — LLM-based content extractors (Doubao, Yuanbao)
-- `llm_service/` — Doubao LLM service via direct HTTP (no browser needed)
-  - `config.py` — Configuration from env vars + cookie_manager (session IDs, device params, model mapping)
-  - `provider.py` — Chat completion logic, payload building, OpenAI-compatible responses
-  - `http_client.py` — Direct HTTP client with Chrome header spoofing, SSE streaming, thread cleanup
+- `doubao-cdp-chat.js` — CDP script for Doubao chat (runs inside Docker container)
+- `llm_service/` — Doubao LLM service via CDP (Chrome DevTools Protocol)
+  - `config.py` — Configuration (CDP container, model mapping, API key)
+  - `provider.py` — Chat completion logic, OpenAI-compatible responses
+  - `cdp_client.py` — Runs doubao-cdp-chat.js inside Docker via `docker exec`
   - `sse_utils.py` — SSE formatting helpers for OpenAI-compatible output
 - `.env.example` — Template for required environment variables
 
@@ -84,8 +84,8 @@ All file-based cookies are stored uniformly in **Playwright JSON format** under
   Yuanbao reads fresh from file each request.
 - **Check status:** `GET /cookies/status` — shows cookie presence, count, last
   update time, and source for all services.
-- **Startup seeding:** `LLM_SESSION_IDS` or `DOUBAO_COOKIE_1` env var is persisted
-  to file on first startup only. After that, use the API to update.
+- **Startup seeding:** `DOUBAO_COOKIE_1` env var is persisted to file on first
+  startup only. After that, use the API to update.
 - **Migration:** Old `yuanbao-cookies.txt` is auto-migrated to JSON format on
   first startup.
 - **Out of scope:** Docker CDP cookies (Goofish) are live Chrome sessions managed
@@ -99,8 +99,9 @@ All file-based cookies are stored uniformly in **Playwright JSON format** under
   logged-in sessions.
 - Weibo "Sina Visitor System" = missing login session, not IP block. Works via
   same-origin fetch from a browser tab on weibo.com.
-- **LLM service** uses direct HTTP to Doubao's `/samantha/chat/completion` endpoint
-  with `sessionid` cookies and Chrome header spoofing. No Playwright/browser needed
-  for the LLM endpoints. Playwright is only used for social media scraping.
-  Configure via env vars in `.env` (see `.env.example`).
+- **LLM service** uses CDP (Chrome DevTools Protocol) to call Doubao's chat API
+  through a logged-in Docker Chrome session. The browser's Argus SDK handles
+  `a_bogus`/`msToken` signing automatically. Requires a Docker container with
+  Chrome logged into doubao.com (default: `test-two-browser`).
+  Same approach as Goofish: `docker exec` runs a Node.js CDP script inside the container.
 - Git remote: `git@github.com:tangojet/mandarin-app-fetch.git`

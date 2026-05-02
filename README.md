@@ -30,7 +30,7 @@ playwright install chromium
 
 # Configure (optional — needed for Doubao LLM endpoints)
 cp .env.example .env
-# Edit .env with your Doubao session ID(s) + device params
+# Edit .env — LLM endpoints need a Docker container with Chrome logged into doubao.com
 
 # Run
 ./run.sh
@@ -87,9 +87,6 @@ curl -X POST http://localhost:8089/v1/chat/completions \
 # List models
 curl http://localhost:8089/v1/models
 
-# Validate a session token
-curl -X POST http://localhost:8089/token/check \
-  -H "Authorization: Bearer YOUR_SESSION_ID"
 ```
 
 ### Utility
@@ -110,8 +107,9 @@ curl http://localhost:8089/rate-limits    # Current rate limit status
 6. Parses the response into a normalized `SocialMediaPost` schema
 7. Returns structured JSON with content, author, media URLs, and comments
 
-The LLM service (`/v1/chat/completions`) uses direct HTTP to Doubao's API with
-`sessionid` cookies and Chrome header spoofing — no browser automation needed.
+The LLM service (`/v1/chat/completions`) uses CDP (Chrome DevTools Protocol) to
+call Doubao's API through a logged-in Docker Chrome session. The browser's Argus
+SDK handles `a_bogus`/`msToken` signing automatically.
 
 ## Project Structure
 
@@ -126,18 +124,21 @@ platforms/               # Per-platform scraper implementations
   xueqiu.py, toutiao.py, goofish.py
 extractors/              # LLM-based content extractors
   doubao.py, yuanbao.py
-llm_service/             # Doubao LLM service (direct HTTP, no browser)
-  config.py, provider.py, http_client.py, sse_utils.py
+doubao-cdp-chat.js       # CDP script for Doubao chat (runs inside Docker)
+llm_service/             # Doubao LLM service (via CDP)
+  config.py, provider.py, cdp_client.py, sse_utils.py
 ```
 
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in values. The Doubao LLM endpoints require:
 
-- `LLM_SESSION_IDS` — Comma-separated `sessionid` values from doubao.com cookies (supports multi-token rotation)
-- `LLM_DEVICE_ID`, `LLM_WEB_ID` — Device params from a real request's URL parameters
+- A Docker container with Chrome logged into doubao.com (default: `test-two-browser`)
+- Set `LLM_CDP_CONTAINER` to override the container name
 
-Legacy env vars (`DOUBAO_COOKIE_1`, `DOUBAO_DEVICE_ID`, `DOUBAO_WEB_ID`) are still supported as fallbacks.
+The CDP approach uses `docker exec` to run a Node.js script inside the container, which
+executes fetch() in the browser's page context. The browser's Argus SDK signs requests
+with `a_bogus`/`msToken` automatically — no manual cookie or device param management needed.
 
 Scraping platforms work without configuration but benefit from logged-in cookies for accessing restricted content.
 
