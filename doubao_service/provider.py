@@ -18,7 +18,6 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from doubao_service.config import DoubaoConfig
-from doubao_service.credentials import CredentialManager
 from doubao_service.playwright_mgr import PlaywrightManager
 from doubao_service.sessions import SessionManager
 from doubao_service.sse_utils import DONE_CHUNK, create_chat_completion_chunk, create_sse_data
@@ -29,15 +28,18 @@ logger = logging.getLogger("doubao_service.provider")
 class DoubaoProvider:
     def __init__(self, config: DoubaoConfig):
         self.config = config
-        self.credential_manager = CredentialManager(config.cookies)
         self.session_manager = SessionManager(ttl=config.session_cache_ttl)
         self.playwright_manager = PlaywrightManager()
 
     async def initialize(self) -> None:
-        await self.playwright_manager.initialize(self.config, self.credential_manager.credentials)
+        await self.playwright_manager.initialize(self.config, self.config.cookies)
 
     async def close(self) -> None:
         await self.playwright_manager.close()
+
+    async def reload_cookies(self, cookie_str: str) -> None:
+        """Hot-reload Doubao cookies into the live browser session."""
+        await self.playwright_manager.reload_cookies(cookie_str)
 
     # ------------------------------------------------------------------
     # Payload building

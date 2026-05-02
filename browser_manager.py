@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Optional
 
 from playwright.async_api import Browser, BrowserContext, async_playwright
 
-logger = logging.getLogger("media-fetch-api")
+import cookie_manager
 
-COOKIE_DIR = Path.home() / ".media-fetch-api"
-XHS_COOKIE_FILE = COOKIE_DIR / "xhs-cookies.json"
+logger = logging.getLogger("media-fetch-api")
 
 _pw = None
 _browser: Optional[Browser] = None
@@ -68,9 +65,9 @@ async def get_xhs_context() -> BrowserContext:
     )
 
     # Load cookies if available
-    if XHS_COOKIE_FILE.exists():
+    cookies = cookie_manager.load_cookies("xhs")
+    if cookies:
         try:
-            cookies = json.loads(XHS_COOKIE_FILE.read_text())
             await _xhs_context.add_cookies(cookies)
             logger.info(f"loaded {len(cookies)} XHS cookies")
         except Exception as e:
@@ -102,10 +99,9 @@ async def get_douyin_context() -> BrowserContext:
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
 
-    cookie_file = COOKIE_DIR / "douyin-cookies.json"
-    if cookie_file.exists():
+    cookies = cookie_manager.load_cookies("douyin")
+    if cookies:
         try:
-            cookies = json.loads(cookie_file.read_text())
             await _douyin_context.add_cookies(cookies)
             logger.info(f"loaded {len(cookies)} Douyin cookies")
         except Exception as e:
@@ -137,10 +133,9 @@ async def get_bilibili_context() -> BrowserContext:
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
 
-    cookie_file = COOKIE_DIR / "bilibili-cookies.json"
-    if cookie_file.exists():
+    cookies = cookie_manager.load_cookies("bilibili")
+    if cookies:
         try:
-            cookies = json.loads(cookie_file.read_text())
             await _bilibili_context.add_cookies(cookies)
             logger.info(f"loaded {len(cookies)} Bilibili cookies")
         except Exception as e:
@@ -172,10 +167,9 @@ async def get_weibo_context() -> BrowserContext:
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
 
-    cookie_file = COOKIE_DIR / "weibo-cookies.json"
-    if cookie_file.exists():
+    cookies = cookie_manager.load_cookies("weibo")
+    if cookies:
         try:
-            cookies = json.loads(cookie_file.read_text())
             await _weibo_context.add_cookies(cookies)
             logger.info(f"loaded {len(cookies)} Weibo cookies")
         except Exception as e:
@@ -207,10 +201,9 @@ async def get_xueqiu_context() -> BrowserContext:
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
 
-    cookie_file = COOKIE_DIR / "xueqiu-cookies.json"
-    if cookie_file.exists():
+    cookies = cookie_manager.load_cookies("xueqiu")
+    if cookies:
         try:
-            cookies = json.loads(cookie_file.read_text())
             await _xueqiu_context.add_cookies(cookies)
             logger.info(f"loaded {len(cookies)} Xueqiu cookies")
         except Exception as e:
@@ -242,10 +235,9 @@ async def get_toutiao_context() -> BrowserContext:
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
 
-    cookie_file = COOKIE_DIR / "toutiao-cookies.json"
-    if cookie_file.exists():
+    cookies = cookie_manager.load_cookies("toutiao")
+    if cookies:
         try:
-            cookies = json.loads(cookie_file.read_text())
             await _toutiao_context.add_cookies(cookies)
             logger.info(f"loaded {len(cookies)} Toutiao cookies")
         except Exception as e:
@@ -261,10 +253,7 @@ async def update_xhs_cookies(cookies: list) -> None:
 
 async def update_platform_cookies(platform: str, cookies: list) -> None:
     """Update cookies for any platform on disk and in the live context."""
-    COOKIE_DIR.mkdir(parents=True, exist_ok=True)
-    cookie_file = COOKIE_DIR / f"{platform}-cookies.json"
-    cookie_file.write_text(json.dumps(cookies, ensure_ascii=False, indent=2))
-    logger.info(f"saved {len(cookies)} {platform} cookies to {cookie_file}")
+    cookie_manager.save_cookies(platform, cookies, source="api")
 
     # Reload into live context if it exists
     context_map = {

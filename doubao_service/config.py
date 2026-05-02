@@ -41,16 +41,29 @@ class DoubaoConfig:
 
 
 def load_config() -> DoubaoConfig:
-    """Build a ``DoubaoConfig`` from environment variables."""
+    """Build a ``DoubaoConfig`` from environment variables.
+
+    Cookie loading priority:
+    1. cookie_manager file (~/.media-fetch-api/doubao-cookies.json)
+    2. DOUBAO_COOKIE_1 env var (legacy)
+    """
+    import cookie_manager
+
+    # Try cookie_manager first (unified file-based storage)
+    cm_header = cookie_manager.load_cookies_as_header("doubao")
     cookies: List[str] = []
-    i = 1
-    while True:
-        val = os.environ.get(f"DOUBAO_COOKIE_{i}")
-        if val:
-            cookies.append(val)
-            i += 1
-        else:
-            break
+    if cm_header:
+        cookies = [cm_header]
+    else:
+        # Fall back to env vars
+        i = 1
+        while True:
+            val = os.environ.get(f"DOUBAO_COOKIE_{i}")
+            if val:
+                cookies.append(val)
+                i += 1
+            else:
+                break
 
     # Accept MODEL_MAPPING as JSON if provided
     model_mapping = {"doubao-pro-chat": "7338286299411103781"}

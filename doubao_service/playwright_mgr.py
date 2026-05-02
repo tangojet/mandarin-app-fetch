@@ -303,6 +303,55 @@ class PlaywrightManager:
                 logger.error("browser_fetch_chat error: %s", e, exc_info=True)
                 return {"error": str(e), "content": "", "conversation_id": None}
 
+    async def reload_cookies(self, cookie_str: str) -> None:
+        """Hot-reload cookies: clear existing, re-inject, re-navigate, re-verify."""
+        async with self._lock:
+            if not self._initialized:
+                raise RuntimeError("PlaywrightManager not initialized.")
+
+            from cookie_manager import parse_raw_header
+
+            logger.info("Reloading Doubao cookies…")
+
+            # Clear existing cookies
+            await self.page.context.clear_cookies()
+
+            # Parse and inject new cookies
+            cookie_list = parse_raw_header(cookie_str, ".doubao.com")
+            if not cookie_list:
+                raise ValueError("No valid cookies parsed from input.")
+            await self.page.context.add_cookies(cookie_list)
+            logger.info("Injected %d cookies.", len(cookie_list))
+
+            # Re-navigate to doubao.com
+            try:
+                await self.page.goto(
+                    "https://www.doubao.com/chat/", wait_until="load", timeout=60000
+                )
+            except PwTimeout as e:
+                raise RuntimeError("Cannot access doubao.com (timeout) after cookie reload.") from e
+
+            # Re-verify login
+            try:
+                logged_in = await self.page.evaluate("""
+                    () => {
+                        const text = document.body.innerText || '';
+                        return !text.includes('登录') || text.includes('历史对话');
+                    }
+                """)
+                if not logged_in:
+                    logger.error("Browser session NOT logged in after cookie reload!")
+                    raise RuntimeError("Not logged in after cookie reload. Cookies may be invalid.")
+                logger.info("Verified: logged in after cookie reload.")
+            except RuntimeError:
+                raise
+            except Exception as e:
+                logger.warning("Login check inconclusive after reload: %s", e)
+
+            # Wait for Argus SDK
+            await asyncio.sleep(3)
+            logger.info("Cookie reload complete.")
+
     async def close(self) -> None:
         if self._initialized:
             async with self._lock:

@@ -15,6 +15,8 @@ User (chat) → test-two bot → ozaiya plugin → mandarin-app-fetch (:8089)
 - `GET /fetch?url=...` — Scrape a social media post, return structured JSON
 - `GET /search?platform=xueqiu&q=...` — Keyword search (Xueqiu only)
 - `GET /extract?url=...` — LLM summary via Doubao or Yuanbao (for WeChat articles etc.)
+- `POST /cookies/{service}` — Update cookies (raw string or Playwright JSON), hot-reloads live sessions
+- `GET /cookies/status` — Cookie status for all services
 - `POST /v1/chat/completions` — OpenAI-compatible Doubao chat (from integrated doubao-2api)
 - `GET /v1/models` — List available Doubao models
 
@@ -44,8 +46,9 @@ runs inside Jun's `goofish-browser` Docker container which has a logged-in Chrom
 ## Key Files
 
 - `main.py` — FastAPI app, platform registry, rate limiting, all endpoints
+- `cookie_manager.py` — Unified cookie storage, parsing, status, seed/migrate logic
 - `url_parser.py` — URL pattern detection and ID extraction per platform
-- `browser_manager.py` — Playwright browser/context lifecycle, cookie management
+- `browser_manager.py` — Playwright browser/context lifecycle, cookie injection
 - `platforms/*.py` — Per-platform scraper implementations
 - `goofish-cdp-extract.js` — CDP script for Goofish (runs inside Docker container)
 - `models.py` — `SocialMediaPost`, `Author`, `Comment` schemas
@@ -54,7 +57,6 @@ runs inside Jun's `goofish-browser` Docker container which has a logged-in Chrom
   - `config.py` — Configuration from env vars (cookies, device fingerprint, model mapping)
   - `provider.py` — Chat completion logic, payload building, OpenAI-compatible responses
   - `playwright_mgr.py` — Headless browser lifecycle, cookie injection, in-page fetch + SSE parsing
-  - `credentials.py` — Multi-cookie rotation
   - `sessions.py` — Conversation ID caching (TTLCache)
   - `sse_utils.py` — SSE formatting helpers
 - `.env.example` — Template for required environment variables
@@ -70,6 +72,24 @@ runs inside Jun's `goofish-browser` Docker container which has a logged-in Chrom
 - **goofish bot**: agent (port 18840), browser (noVNC: 16090)
   - Config: `~/.openclaw-goofish/openclaw.json`
   - Browser data: `~/openclaw-local/browser-data/goofish-chrome`
+
+## Cookie Management
+
+All file-based cookies are stored uniformly in **Playwright JSON format** under
+`~/.media-fetch-api/{service}-cookies.json`, managed by `cookie_manager.py`.
+
+- **Update cookies:** `POST /cookies/{service}` — accepts raw header string
+  (`Content-Type: text/plain`) or Playwright JSON array (`application/json`).
+  Hot-reloads into the live Playwright context (scraping platforms) or re-injects
+  into Doubao's browser session. Yuanbao reads fresh from file each request.
+- **Check status:** `GET /cookies/status` — shows cookie presence, count, last
+  update time, and source for all services.
+- **Startup seeding:** `DOUBAO_COOKIE_1` env var is persisted to file on first
+  startup only. After that, use the API to update.
+- **Migration:** Old `yuanbao-cookies.txt` is auto-migrated to JSON format on
+  first startup.
+- **Out of scope:** Docker CDP cookies (Goofish) are live Chrome sessions managed
+  via noVNC — not file-based.
 
 ## Development Notes
 

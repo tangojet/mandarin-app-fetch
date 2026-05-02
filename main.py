@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -13,6 +12,7 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import JSONResponse
 
+import cookie_manager
 from browser_manager import close_browser, update_platform_cookies
 from doubao_service.config import DoubaoConfig, is_configured as doubao_is_configured, load_config as load_doubao_config
 from doubao_service.provider import DoubaoProvider
@@ -96,6 +96,10 @@ async def lifespan(app: FastAPI):
     global _doubao_provider, _doubao_config
 
     logger.info("media-fetch-api starting")
+
+    # Seed/migrate cookies before initializing providers
+    cookie_manager.seed_from_env()
+    cookie_manager.migrate_yuanbao_txt()
 
     # Initialise Doubao provider if configured
     _doubao_config = load_doubao_config()
@@ -196,12 +200,57 @@ async def search_posts(
         raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
 
-@app.post("/cookies/{platform}")
-async def update_cookies(platform: str, cookies: List[dict]):
-    if platform not in PLATFORMS:
-        raise HTTPException(status_code=400, detail=f"Unknown platform: {platform}")
-    await update_platform_cookies(platform, cookies)
+@app.post("/cookies/{service}")
+async def update_cookies(service: str, request: Request):
+    """Update cookies for any service.
+
+    Accepts:
+    - Content-Type: text/plain → raw cookie header string ("k1=v1; k2=v2")
+    - Content-Type: application/json → Playwright JSON array or raw string
+    """
+    all_services = set(cookie_manager.SERVICES) | set(PLATFORMS)
+    if service not in all_services:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown service: {service}. Known: {sorted(all_services)}",
+        )
+    if service in cookie_manager.CDP_SERVICES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{service} uses Docker CDP — manage cookies via the Chrome session, not this API.",
+        )
+
+    content_type = request.headers.get("content-type", "")
+    if "text/plain" in content_type:
+        body = (await request.body()).decode("utf-8").strip()
+        cookies = cookie_manager.detect_and_normalize(body, service)
+    else:
+        body = await request.json()
+        cookies = cookie_manager.detect_and_normalize(body, service)
+
+    # Hot-reload into live system (update_platform_cookies saves + reloads context)
+    if service in PLATFORMS:
+        await update_platform_cookies(service, cookies)
+    else:
+        cookie_manager.save_cookies(service, cookies, source="api")
+
+    if service == "doubao" and _doubao_provider:
+        try:
+            header = cookie_manager.cookies_to_header(cookies)
+            await _doubao_provider.reload_cookies(header)
+        except Exception as e:
+            logger.warning("Doubao hot-reload failed: %s", e)
+            return {"status": "saved", "count": len(cookies),
+                    "warning": f"Cookies saved but hot-reload failed: {e}"}
+    # yuanbao: no-op — reads file fresh each request
+
     return {"status": "ok", "count": len(cookies)}
+
+
+@app.get("/cookies/status")
+async def cookies_status():
+    """Return cookie status for all known services."""
+    return cookie_manager.get_all_status()
 
 
 # --- /extract endpoint — LLM-based content summarization ---

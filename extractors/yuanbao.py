@@ -14,43 +14,33 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
 
 import httpx
+
+import cookie_manager
 
 logger = logging.getLogger("extractor.yuanbao")
 
 YUANBAO_BASE = "https://yuanbao.tencent.com"
 DEFAULT_AGENT_ID = "naQivTmsDa"
 DEFAULT_CHAT_MODEL_ID = "deep_seek_v3"
-DEFAULT_COOKIE_FILE = str(Path.home() / ".media-fetch-api" / "yuanbao-cookies.txt")
 
 
-def _get_config() -> tuple[str, str, str]:
-    """Return (cookie_file, agent_id, chat_model_id)."""
-    cookie_file = os.environ.get("YUANBAO_COOKIE_FILE", DEFAULT_COOKIE_FILE)
+def _get_config() -> tuple[str, str]:
+    """Return (agent_id, chat_model_id)."""
     agent_id = os.environ.get("YUANBAO_AGENT_ID", DEFAULT_AGENT_ID)
     chat_model_id = os.environ.get("YUANBAO_CHAT_MODEL_ID", DEFAULT_CHAT_MODEL_ID)
-    return cookie_file, agent_id, chat_model_id
+    return agent_id, chat_model_id
 
 
 def is_configured() -> bool:
-    """Return True if the cookie file exists."""
-    cookie_file = os.environ.get("YUANBAO_COOKIE_FILE", DEFAULT_COOKIE_FILE)
-    return Path(cookie_file).is_file()
+    """Return True if yuanbao cookies are available."""
+    return cookie_manager.load_cookies("yuanbao") is not None
 
 
 def _load_cookies() -> str | None:
-    """Read cookies from file."""
-    cookie_file = os.environ.get("YUANBAO_COOKIE_FILE", DEFAULT_COOKIE_FILE)
-    try:
-        return Path(cookie_file).read_text().strip()
-    except FileNotFoundError:
-        logger.warning("cookie file not found: %s", cookie_file)
-        return None
-    except Exception as e:
-        logger.warning("failed to read cookie file %s: %s", cookie_file, e)
-        return None
+    """Read cookies as a raw header string."""
+    return cookie_manager.load_cookies_as_header("yuanbao")
 
 
 async def _create_conversation(agent_id: str, cookies: str) -> str | None:
@@ -142,7 +132,7 @@ async def extract_with_yuanbao(url: str) -> str | None:
         logger.warning("no cookies available, skipping")
         return None
 
-    _, agent_id, chat_model_id = _get_config()
+    agent_id, chat_model_id = _get_config()
 
     # Step 1: Create conversation
     conversation_id = await _create_conversation(agent_id, cookies)
