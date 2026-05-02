@@ -14,7 +14,7 @@ Built with FastAPI + Playwright headless browser with anti-detection stealth pat
 | Weibo | 微博 | Playwright + mobile API |
 | Xueqiu | 雪球 | Playwright + same-origin fetch (WAF bypass) |
 | Toutiao | 头条 | Playwright + web API / DOM fallback |
-| Goofish | ��鱼 | Docker CDP (logged-in Chrome session) |
+| Goofish | 闲鱼 | Docker CDP (logged-in Chrome session) |
 
 ## Quick Start
 
@@ -30,7 +30,7 @@ playwright install chromium
 
 # Configure (optional — needed for Doubao LLM endpoints)
 cp .env.example .env
-# Edit .env with your Doubao cookie + device fingerprint
+# Edit .env with your Doubao session ID(s) + device params
 
 # Run
 ./run.sh
@@ -79,8 +79,17 @@ curl -X POST http://localhost:8089/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"doubao-pro-chat","messages":[{"role":"user","content":"hello"}]}'
 
+# Chat completion (streaming)
+curl -X POST http://localhost:8089/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"doubao-pro-chat","messages":[{"role":"user","content":"hello"}],"stream":true}'
+
 # List models
 curl http://localhost:8089/v1/models
+
+# Validate a session token
+curl -X POST http://localhost:8089/token/check \
+  -H "Authorization: Bearer YOUR_SESSION_ID"
 ```
 
 ### Utility
@@ -101,6 +110,9 @@ curl http://localhost:8089/rate-limits    # Current rate limit status
 6. Parses the response into a normalized `SocialMediaPost` schema
 7. Returns structured JSON with content, author, media URLs, and comments
 
+The LLM service (`/v1/chat/completions`) uses direct HTTP to Doubao's API with
+`sessionid` cookies and Chrome header spoofing — no browser automation needed.
+
 ## Project Structure
 
 ```
@@ -114,17 +126,18 @@ platforms/               # Per-platform scraper implementations
   xueqiu.py, toutiao.py, goofish.py
 extractors/              # LLM-based content extractors
   doubao.py, yuanbao.py
-doubao_service/          # Integrated Doubao LLM service
-  config.py, provider.py, playwright_mgr.py,
-  sessions.py, sse_utils.py
+llm_service/             # Doubao LLM service (direct HTTP, no browser)
+  config.py, provider.py, http_client.py, sse_utils.py
 ```
 
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in values. The Doubao LLM endpoints require:
 
-- `DOUBAO_COOKIE_1` — Cookie string from doubao.com (used for initial seeding only; update via API after)
-- `DOUBAO_DEVICE_ID`, `DOUBAO_FP`, `DOUBAO_TEA_UUID`, `DOUBAO_WEB_ID` — Device fingerprint from a real request's URL parameters
+- `LLM_SESSION_IDS` — Comma-separated `sessionid` values from doubao.com cookies (supports multi-token rotation)
+- `LLM_DEVICE_ID`, `LLM_WEB_ID` — Device params from a real request's URL parameters
+
+Legacy env vars (`DOUBAO_COOKIE_1`, `DOUBAO_DEVICE_ID`, `DOUBAO_WEB_ID`) are still supported as fallbacks.
 
 Scraping platforms work without configuration but benefit from logged-in cookies for accessing restricted content.
 

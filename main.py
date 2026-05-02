@@ -14,8 +14,8 @@ from fastapi.responses import JSONResponse
 
 import cookie_manager
 from browser_manager import close_browser, update_platform_cookies
-from doubao_service.config import DoubaoConfig, is_configured as doubao_is_configured, load_config as load_doubao_config
-from doubao_service.provider import DoubaoProvider
+from llm_service.config import LLMConfig, is_configured as llm_is_configured, load_config as load_llm_config
+from llm_service.provider import LLMProvider
 from extractors.doubao import extract_with_doubao
 from extractors.yuanbao import extract_with_yuanbao, is_configured as yuanbao_configured
 from models import SocialMediaPost
@@ -81,19 +81,19 @@ def _check_rate_limit(platform: str) -> None:
     _last_request[platform] = now
 
 
-# --- Doubao provider (global, initialised in lifespan) ---
-_doubao_provider: Optional[DoubaoProvider] = None
-_doubao_config: Optional[DoubaoConfig] = None
+# --- LLM provider (global, initialised in lifespan) ---
+_llm_provider: Optional[LLMProvider] = None
+_llm_config: Optional[LLMConfig] = None
 
 
-def get_doubao_provider() -> Optional[DoubaoProvider]:
-    """Return the global DoubaoProvider if initialised."""
-    return _doubao_provider
+def get_llm_provider() -> Optional[LLMProvider]:
+    """Return the global LLMProvider if initialised."""
+    return _llm_provider
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _doubao_provider, _doubao_config
+    global _llm_provider, _llm_config
 
     logger.info("media-fetch-api starting")
 
@@ -101,25 +101,25 @@ async def lifespan(app: FastAPI):
     cookie_manager.seed_from_env()
     cookie_manager.migrate_yuanbao_txt()
 
-    # Initialise Doubao provider if configured
-    _doubao_config = load_doubao_config()
-    if doubao_is_configured(_doubao_config):
+    # Initialise LLM provider if configured
+    _llm_config = load_llm_config()
+    if llm_is_configured(_llm_config):
         try:
-            _doubao_provider = DoubaoProvider(_doubao_config)
-            await _doubao_provider.initialize()
-            logger.info("Doubao provider initialised (models: %s)",
-                        ", ".join(_doubao_config.model_mapping.keys()))
+            _llm_provider = LLMProvider(_llm_config)
+            await _llm_provider.initialize()
+            logger.info("LLM provider initialised (models: %s)",
+                        ", ".join(_llm_config.model_mapping.keys()))
         except Exception:
-            logger.exception("Failed to initialise Doubao provider — continuing without it")
-            _doubao_provider = None
+            logger.exception("Failed to initialise LLM provider — continuing without it")
+            _llm_provider = None
     else:
-        logger.info("Doubao provider not configured (missing env vars), skipping")
+        logger.info("LLM provider not configured (missing session IDs or device params), skipping")
 
     yield
 
     logger.info("media-fetch-api shutting down")
-    if _doubao_provider:
-        await _doubao_provider.close()
+    if _llm_provider:
+        await _llm_provider.close()
     await close_browser()
 
 
@@ -205,8 +205,8 @@ async def update_cookies(service: str, request: Request):
     """Update cookies for any service.
 
     Accepts:
-    - Content-Type: text/plain → raw cookie header string ("k1=v1; k2=v2")
-    - Content-Type: application/json → Playwright JSON array or raw string
+    - Content-Type: text/plain -> raw cookie header string ("k1=v1; k2=v2")
+    - Content-Type: application/json -> Playwright JSON array or raw string
     """
     all_services = set(cookie_manager.SERVICES) | set(PLATFORMS)
     if service not in all_services:
@@ -234,15 +234,8 @@ async def update_cookies(service: str, request: Request):
     else:
         cookie_manager.save_cookies(service, cookies, source="api")
 
-    if service == "doubao" and _doubao_provider:
-        try:
-            header = cookie_manager.cookies_to_header(cookies)
-            await _doubao_provider.reload_cookies(header)
-        except Exception as e:
-            logger.warning("Doubao hot-reload failed: %s", e)
-            return {"status": "saved", "count": len(cookies),
-                    "warning": f"Cookies saved but hot-reload failed: {e}"}
-    # yuanbao: no-op — reads file fresh each request
+    # doubao: stateless HTTP client — just save the cookies, no hot-reload needed
+    # yuanbao: reads file fresh each request — no-op
 
     return {"status": "ok", "count": len(cookies)}
 
@@ -255,7 +248,7 @@ async def cookies_status():
 
 # --- /extract endpoint — LLM-based content summarization ---
 
-# Extract backend routing: platform → backend name
+# Extract backend routing: platform -> backend name
 EXTRACT_ROUTING: Dict[str, str] = {
     "wechat": "yuanbao",
 }
@@ -301,10 +294,10 @@ async def extract_content(
             status_code=501,
             detail="Yuanbao backend not configured (missing cookie file)",
         )
-    if backend == "doubao" and not _doubao_provider:
+    if backend == "doubao" and not _llm_provider:
         raise HTTPException(
             status_code=501,
-            detail="Doubao backend not configured (missing DOUBAO_COOKIE / device fingerprint env vars)",
+            detail="LLM backend not configured (missing session IDs or device params)",
         )
 
     _check_extract_rate_limit(backend)
@@ -330,13 +323,13 @@ async def extract_content(
     }
 
 
-# --- Doubao OpenAI-compatible endpoints (from doubao-2api) ---
+# --- LLM OpenAI-compatible endpoints ---
 
-async def _verify_doubao_api_key(authorization: Optional[str] = Header(None)) -> None:
-    """Check Bearer token against DOUBAO_API_KEY / API_MASTER_KEY if set."""
-    if not _doubao_config or not _doubao_config.api_master_key:
+async def _verify_llm_api_key(authorization: Optional[str] = Header(None)) -> None:
+    """Check Bearer token against LLM_API_KEY / DOUBAO_API_KEY if set."""
+    if not _llm_config or not _llm_config.api_key:
         return
-    key = _doubao_config.api_master_key
+    key = _llm_config.api_key
     if key == "1":  # magic value = no auth
         return
     if not authorization or "bearer" not in authorization.lower():
@@ -347,15 +340,15 @@ async def _verify_doubao_api_key(authorization: Optional[str] = Header(None)) ->
 
 
 @app.post("/v1/chat/completions")
-async def doubao_chat_completions(request: Request, authorization: Optional[str] = Header(None)):
-    await _verify_doubao_api_key(authorization)
-    if not _doubao_provider:
-        raise HTTPException(status_code=501, detail="Doubao provider not configured or failed to initialise.")
+async def llm_chat_completions(request: Request, authorization: Optional[str] = Header(None)):
+    await _verify_llm_api_key(authorization)
+    if not _llm_provider:
+        raise HTTPException(status_code=501, detail="LLM provider not configured or failed to initialise.")
     try:
         request_data = await request.json()
         logger.info("POST /v1/chat/completions model=%s stream=%s",
                      request_data.get("model", "?"), request_data.get("stream", True))
-        return await _doubao_provider.chat_completion(request_data)
+        return await _llm_provider.chat_completion(request_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -364,11 +357,31 @@ async def doubao_chat_completions(request: Request, authorization: Optional[str]
 
 
 @app.get("/v1/models")
-async def doubao_list_models(authorization: Optional[str] = Header(None)):
-    await _verify_doubao_api_key(authorization)
-    if not _doubao_provider:
-        raise HTTPException(status_code=501, detail="Doubao provider not configured or failed to initialise.")
-    return await _doubao_provider.get_models()
+async def llm_list_models(authorization: Optional[str] = Header(None)):
+    await _verify_llm_api_key(authorization)
+    if not _llm_provider:
+        raise HTTPException(status_code=501, detail="LLM provider not configured or failed to initialise.")
+    return await _llm_provider.get_models()
+
+
+@app.post("/token/check")
+async def check_token(request: Request):
+    """Validate a Doubao sessionid token.
+
+    Send the sessionid as the Bearer token in the Authorization header.
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth or "bearer" not in auth.lower():
+        raise HTTPException(status_code=400, detail="Send sessionid as Bearer token in Authorization header.")
+    token = auth.split(" ")[-1].strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Empty token.")
+
+    if not _llm_provider:
+        raise HTTPException(status_code=501, detail="LLM provider not configured.")
+
+    valid = await _llm_provider.http_client.check_token(token)
+    return {"valid": valid, "token": token[:6] + "..." + token[-4:] if len(token) > 12 else "***"}
 
 
 if __name__ == "__main__":

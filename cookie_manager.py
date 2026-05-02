@@ -205,23 +205,42 @@ def get_all_status() -> dict:
 # ---------------------------------------------------------------------------
 
 def seed_from_env() -> None:
-    """Persist DOUBAO_COOKIE_1 env var to file if no file exists yet.
+    """Persist session env vars to cookie file if no file exists yet.
 
-    Called once at startup so the env var bootstraps the first cookie file,
+    Called once at startup so env vars bootstrap the first cookie file,
     but subsequent updates go through the API.
+
+    Supports:
+    - LLM_SESSION_IDS — comma-separated sessionid values (new, preferred)
+    - DOUBAO_COOKIE_1 — full cookie header string (legacy)
     """
     path = _cookie_path("doubao")
     if path.exists():
         logger.info("doubao cookie file already exists, skipping env seed")
         return
 
+    # Priority 1: LLM_SESSION_IDS — convert sessionid values to Playwright cookie format
+    raw_ids = os.environ.get("LLM_SESSION_IDS", "").strip()
+    if raw_ids:
+        cookies = []
+        for sid in raw_ids.split(","):
+            sid = sid.strip()
+            if sid:
+                cookies.append({"name": "sessionid", "value": sid, "domain": ".doubao.com", "path": "/"})
+                cookies.append({"name": "sessionid_ss", "value": sid, "domain": ".doubao.com", "path": "/"})
+        if cookies:
+            save_cookies("doubao", cookies, source="env:LLM_SESSION_IDS")
+            logger.info("seeded doubao cookies from LLM_SESSION_IDS env var (%d session IDs)", len(cookies) // 2)
+            return
+
+    # Priority 2: DOUBAO_COOKIE_1 — full cookie header (legacy)
     cookie_str = os.environ.get("DOUBAO_COOKIE_1")
     if not cookie_str:
         return
 
     cookies = parse_raw_header(cookie_str, ".doubao.com")
     if cookies:
-        save_cookies("doubao", cookies, source="env")
+        save_cookies("doubao", cookies, source="env:DOUBAO_COOKIE_1")
         logger.info("seeded doubao cookies from DOUBAO_COOKIE_1 env var")
 
 

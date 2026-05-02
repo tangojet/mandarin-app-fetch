@@ -17,8 +17,9 @@ User (chat) → test-two bot → ozaiya plugin → mandarin-app-fetch (:8089)
 - `GET /extract?url=...` — LLM summary via Doubao or Yuanbao (for WeChat articles etc.)
 - `POST /cookies/{service}` — Update cookies (raw string or Playwright JSON), hot-reloads live sessions
 - `GET /cookies/status` — Cookie status for all services
-- `POST /v1/chat/completions` — OpenAI-compatible Doubao chat (from integrated doubao-2api)
+- `POST /v1/chat/completions` — OpenAI-compatible Doubao chat via direct HTTP
 - `GET /v1/models` — List available Doubao models
+- `POST /token/check` — Validate a Doubao sessionid token
 
 ## Supported Platforms
 
@@ -53,12 +54,11 @@ runs inside Jun's `goofish-browser` Docker container which has a logged-in Chrom
 - `goofish-cdp-extract.js` — CDP script for Goofish (runs inside Docker container)
 - `models.py` — `SocialMediaPost`, `Author`, `Comment` schemas
 - `extractors/` — LLM-based content extractors (Doubao, Yuanbao)
-- `doubao_service/` — Integrated Doubao LLM service (formerly standalone doubao-2api on port 8088)
-  - `config.py` — Configuration from env vars (cookies, device fingerprint, model mapping)
+- `llm_service/` — Doubao LLM service via direct HTTP (no browser needed)
+  - `config.py` — Configuration from env vars + cookie_manager (session IDs, device params, model mapping)
   - `provider.py` — Chat completion logic, payload building, OpenAI-compatible responses
-  - `playwright_mgr.py` — Headless browser lifecycle, cookie injection, in-page fetch + SSE parsing
-  - `sessions.py` — Conversation ID caching (TTLCache)
-  - `sse_utils.py` — SSE formatting helpers
+  - `http_client.py` — Direct HTTP client with Chrome header spoofing, SSE streaming, thread cleanup
+  - `sse_utils.py` — SSE formatting helpers for OpenAI-compatible output
 - `.env.example` — Template for required environment variables
 
 ## Jun's Infrastructure (192.168.1.181)
@@ -80,12 +80,12 @@ All file-based cookies are stored uniformly in **Playwright JSON format** under
 
 - **Update cookies:** `POST /cookies/{service}` — accepts raw header string
   (`Content-Type: text/plain`) or Playwright JSON array (`application/json`).
-  Hot-reloads into the live Playwright context (scraping platforms) or re-injects
-  into Doubao's browser session. Yuanbao reads fresh from file each request.
+  Hot-reloads into the live Playwright context for scraping platforms.
+  Yuanbao reads fresh from file each request.
 - **Check status:** `GET /cookies/status` — shows cookie presence, count, last
   update time, and source for all services.
-- **Startup seeding:** `DOUBAO_COOKIE_1` env var is persisted to file on first
-  startup only. After that, use the API to update.
+- **Startup seeding:** `LLM_SESSION_IDS` or `DOUBAO_COOKIE_1` env var is persisted
+  to file on first startup only. After that, use the API to update.
 - **Migration:** Old `yuanbao-cookies.txt` is auto-migrated to JSON format on
   first startup.
 - **Out of scope:** Docker CDP cookies (Goofish) are live Chrome sessions managed
@@ -99,7 +99,8 @@ All file-based cookies are stored uniformly in **Playwright JSON format** under
   logged-in sessions.
 - Weibo "Sina Visitor System" = missing login session, not IP block. Works via
   same-origin fetch from a browser tab on weibo.com.
-- **Doubao service** is integrated directly — no separate doubao-2api process on port 8088
-  needed. The `/v1/chat/completions` endpoint is served from this app on port 8089.
+- **LLM service** uses direct HTTP to Doubao's `/samantha/chat/completion` endpoint
+  with `sessionid` cookies and Chrome header spoofing. No Playwright/browser needed
+  for the LLM endpoints. Playwright is only used for social media scraping.
   Configure via env vars in `.env` (see `.env.example`).
 - Git remote: `git@github.com:tangojet/mandarin-app-fetch.git`

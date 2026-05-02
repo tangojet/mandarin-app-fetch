@@ -1,12 +1,7 @@
-"""Doubao (豆包) extractor — uses the integrated DoubaoProvider directly.
+"""Doubao (豆包) extractor — uses the integrated LLMProvider directly.
 
-Calls the local DoubaoProvider (no HTTP round-trip) to summarize URLs.
+Calls the local LLMProvider (no HTTP round-trip) to summarize URLs.
 Falls back gracefully if the provider isn't configured or initialised.
-
-Env vars (for the provider):
-  DOUBAO_COOKIE_1  — Required, full cookie string from doubao.com
-  DOUBAO_DEVICE_ID, DOUBAO_FP, DOUBAO_TEA_UUID, DOUBAO_WEB_ID — Required device fingerprint
-  DOUBAO_DEFAULT_MODEL — Model name (default: doubao-pro-chat)
 """
 
 from __future__ import annotations
@@ -17,27 +12,27 @@ logger = logging.getLogger("extractor.doubao")
 
 
 def is_configured() -> bool:
-    """Return True if the Doubao provider is initialised and available."""
-    from main import get_doubao_provider
-    return get_doubao_provider() is not None
+    """Return True if the LLM provider is initialised and available."""
+    from main import get_llm_provider
+    return get_llm_provider() is not None
 
 
 async def extract_with_doubao(url: str) -> str | None:
-    """Summarize a URL using the integrated Doubao provider.
+    """Summarize a URL using the integrated LLM provider.
 
     Returns the summary text, or None on failure.
     """
-    from main import get_doubao_provider
+    from main import get_llm_provider
 
-    provider = get_doubao_provider()
+    provider = get_llm_provider()
     if not provider:
-        logger.warning("Doubao provider not available, skipping")
+        logger.warning("LLM provider not available, skipping")
         return None
 
     model = provider.config.default_model
     prompt = f"请总结这个链接的内容：{url}"
 
-    logger.info("summarizing %s via local DoubaoProvider (model=%s)", url, model)
+    logger.info("summarizing %s via LLMProvider (model=%s)", url, model)
 
     try:
         request_data = {
